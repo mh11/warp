@@ -130,7 +130,7 @@ task GtcToVcf {
   }
 
   runtime {
-    docker: "us.gcr.io/broad-gotc-prod/picard-cloud:2.23.0"
+    docker: "us.gcr.io/broad-gotc-prod/picard-cloud:gg_GL-600_Test"
     disks: "local-disk " + disk_size + " HDD"
     memory: "~{memory} GiB"
     cpu: 2
