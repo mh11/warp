@@ -23,7 +23,7 @@ import "../../structs/dna_seq/DNASeqStructs.wdl" as Structs
 workflow SplitLargeReadGroup {
 
   input {
-    File input_bam
+    String input_bam
 
     String bwa_commandline
     String output_bam_basename
@@ -62,25 +62,25 @@ workflow SplitLargeReadGroup {
         hard_clip_reads = hard_clip_reads
     }
 
-    Float current_mapped_size = size(SamToFastqAndBwaMemAndMba.output_bam, "GiB")
+    # Float current_mapped_size = size(SamToFastqAndBwaMemAndMba.output_bam, "GiB")
   }
 
-  call Utils.SumFloats as SumSplitAlignedSizes {
-    input:
-      sizes = current_mapped_size,
-      preemptible_tries = preemptible_tries
-  }
+  # call Utils.SumFloats as SumSplitAlignedSizes {
+  #   input:
+  #     sizes = current_mapped_size,
+  #     preemptible_tries = preemptible_tries
+  # }
 
   call Processing.GatherUnsortedBamFiles as GatherMonolithicBamFile {
     input:
       input_bams = SamToFastqAndBwaMemAndMba.output_bam,
-      total_input_size = SumSplitAlignedSizes.total_size,
+      # total_input_size = SumSplitAlignedSizes.total_size,
       output_bam_basename = output_bam_basename,
       preemptible_tries = preemptible_tries,
       compression_level = compression_level
   }
   output {
-    File aligned_bam = GatherMonolithicBamFile.output_bam
+    String aligned_bam = GatherMonolithicBamFile.output_bam
   }
   meta {
     allowNestedInputs: true

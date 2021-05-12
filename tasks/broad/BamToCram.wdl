@@ -6,12 +6,12 @@ import "../../tasks/broad/Qc.wdl" as QC
 workflow BamToCram {
 
   input {
-    File input_bam
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
-    File duplication_metrics
-    File chimerism_metrics
+    String input_bam
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
+    String duplication_metrics
+    String chimerism_metrics
     String base_file_name
     Int agg_preemptible_tries
   }
@@ -58,13 +58,10 @@ workflow BamToCram {
   }
 
   output {
-     File output_cram = ConvertToCram.output_cram
-     File output_cram_index = ConvertToCram.output_cram_index
-     File output_cram_md5 = ConvertToCram.output_cram_md5
-     File validate_cram_file_report = ValidateCram.report
-  }
-  meta {
-    allowNestedInputs: true
+     String output_cram = ConvertToCram.output_cram
+     String output_cram_index = ConvertToCram.output_cram_index
+     String output_cram_md5 = ConvertToCram.output_cram_md5
+     String validate_cram_file_report = ValidateCram.report
   }
 }
 

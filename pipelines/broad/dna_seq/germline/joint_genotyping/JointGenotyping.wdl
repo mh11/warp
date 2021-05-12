@@ -9,43 +9,48 @@ workflow JointGenotyping {
   String pipeline_version = "1.4.0"
 
   input {
-    File unpadded_intervals_file
+    String unpadded_intervals_file
+    String scatterDir
+    String workspace_dir_name
 
     String callset_name
-    File sample_name_map
+    String sample_name_map
+    String sample_name_map_update
 
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
 
-    File dbsnp_vcf
-    File dbsnp_vcf_index
+    String dbsnp_vcf
+    String dbsnp_vcf_index
 
     Int small_disk
     Int medium_disk
     Int large_disk
     Int huge_disk
 
+    Int import_batch_size = 50
+
     Array[String] snp_recalibration_tranche_values
     Array[String] snp_recalibration_annotation_values
     Array[String] indel_recalibration_tranche_values
     Array[String] indel_recalibration_annotation_values
 
-    File haplotype_database
+    String haplotype_database
 
-    File eval_interval_list
-    File hapmap_resource_vcf
-    File hapmap_resource_vcf_index
-    File omni_resource_vcf
-    File omni_resource_vcf_index
-    File one_thousand_genomes_resource_vcf
-    File one_thousand_genomes_resource_vcf_index
-    File mills_resource_vcf
-    File mills_resource_vcf_index
-    File axiomPoly_resource_vcf
-    File axiomPoly_resource_vcf_index
-    File dbsnp_resource_vcf = dbsnp_vcf
-    File dbsnp_resource_vcf_index = dbsnp_vcf_index
+    String eval_interval_list
+    String hapmap_resource_vcf
+    String hapmap_resource_vcf_index
+    String omni_resource_vcf
+    String omni_resource_vcf_index
+    String one_thousand_genomes_resource_vcf
+    String one_thousand_genomes_resource_vcf_index
+    String mills_resource_vcf
+    String mills_resource_vcf_index
+    String axiomPoly_resource_vcf
+    String axiomPoly_resource_vcf_index
+    String dbsnp_resource_vcf = dbsnp_vcf
+    String dbsnp_resource_vcf_index = dbsnp_vcf_index
 
     # ExcessHet is a phred-scaled p-value. We want a cutoff of anything more extreme
     # than a z-score of -4.5 which is a p-value of 3.4e-06, which phred-scaled is 54.69
@@ -64,7 +69,10 @@ workflow JointGenotyping {
     Boolean use_allele_specific_annotations = true
     Boolean cross_check_fingerprints = true
     Boolean scatter_cross_check_fingerprints = false
+    Boolean skip_vcf_part = false
   }
+
+  String sample_name_mapped = if defined(sample_name_map_update) then sample_name_map_update else sample_name_map
 
   Boolean allele_specific_annotations = !use_gnarly_genotyper && use_allele_specific_annotations
 
@@ -98,10 +106,11 @@ workflow JointGenotyping {
       ref_fasta_index = ref_fasta_index,
       ref_dict = ref_dict,
       disk_size = small_disk,
-      sample_names_unique_done = CheckSamplesUnique.samples_unique
+      sample_names_unique_done = CheckSamplesUnique.samples_unique,
+      scatterDir = scatterDir
   }
 
-  Array[File] unpadded_intervals = SplitIntervalList.output_intervals
+  Array[String] unpadded_intervals = SplitIntervalList.output_intervals
 
   scatter (idx in range(length(unpadded_intervals))) {
     # The batch_size value was carefully chosen here as it
@@ -110,14 +119,14 @@ workflow JointGenotyping {
     # the Hellbender (GATK engine) team!
     call Tasks.ImportGVCFs {
       input:
-        sample_name_map = sample_name_map,
+        sample_name_map = sample_name_mapped,
         interval = unpadded_intervals[idx],
         ref_fasta = ref_fasta,
         ref_fasta_index = ref_fasta_index,
         ref_dict = ref_dict,
-        workspace_dir_name = "genomicsdb",
+        workspace_dir_name = workspace_dir_name,
         disk_size = medium_disk,
-        batch_size = 50
+        batch_size = import_batch_size
     }
 
     if (use_gnarly_genotyper) {
@@ -133,7 +142,7 @@ workflow JointGenotyping {
           sample_names_unique_done = CheckSamplesUnique.samples_unique
       }
 
-      Array[File] gnarly_intervals = GnarlyIntervalScatterDude.output_intervals
+      Array[String] gnarly_intervals = GnarlyIntervalScatterDude.output_intervals
 
       scatter (gnarly_idx in range(length(gnarly_intervals))) {
         call Tasks.GnarlyGenotyper {
@@ -148,7 +157,7 @@ workflow JointGenotyping {
         }
       }
 
-      Array[File] gnarly_gvcfs = GnarlyGenotyper.output_vcf
+      Array[String] gnarly_gvcfs = GnarlyGenotyper.output_vcf
 
       call Tasks.GatherVcfs as TotallyRadicalGatherVcfs {
         input:
@@ -172,8 +181,8 @@ workflow JointGenotyping {
       }
     }
 
-    File genotyped_vcf = select_first([TotallyRadicalGatherVcfs.output_vcf, GenotypeGVCFs.output_vcf])
-    File genotyped_vcf_index = select_first([TotallyRadicalGatherVcfs.output_vcf_index, GenotypeGVCFs.output_vcf_index])
+    String genotyped_vcf = select_first([TotallyRadicalGatherVcfs.output_vcf, GenotypeGVCFs.output_vcf])
+    String genotyped_vcf_index = select_first([TotallyRadicalGatherVcfs.output_vcf_index, GenotypeGVCFs.output_vcf_index])
 
     call Tasks.HardFilterAndMakeSitesOnlyVcf {
       input:
@@ -259,7 +268,7 @@ workflow JointGenotyping {
 
     call Tasks.GatherTranches as SNPGatherTranches {
       input:
-        tranches = SNPsVariantRecalibratorScattered.tranches,
+        tranches_in = SNPsVariantRecalibratorScattered.tranches,
         output_filename = callset_name + ".snps.gathered.tranches",
         mode = "SNP",
         disk_size = small_disk
@@ -368,7 +377,7 @@ workflow JointGenotyping {
     Array[Int] fingerprinting_indices = GetFingerprintingIntervalIndices.indices_to_fingerprint
 
     scatter (idx in fingerprinting_indices) {
-      File vcfs_to_fingerprint = HardFilterAndMakeSitesOnlyVcf.variant_filtered_vcf[idx]
+      String vcfs_to_fingerprint = HardFilterAndMakeSitesOnlyVcf.variant_filtered_vcf[idx]
     }
 
     call Tasks.GatherVcfs as GatherFingerprintingVcfs {
@@ -394,7 +403,7 @@ workflow JointGenotyping {
 
     scatter (idx in range(length(PartitionSampleNameMap.partitions))) {
 
-      Array[File] files_in_partition = read_lines(PartitionSampleNameMap.partitions[idx])
+      Array[String] files_in_partition = read_lines(PartitionSampleNameMap.partitions[idx])
 
       call Tasks.CrossCheckFingerprint as CrossCheckFingerprintsScattered {
         input:
@@ -418,7 +427,7 @@ workflow JointGenotyping {
   if (!scatter_cross_check_fingerprints) {
 
     scatter (line in sample_name_map_lines) {
-      File gvcf_paths = line[1]
+      String gvcf_paths = line[1]
     }
 
     call Tasks.CrossCheckFingerprint as CrossCheckFingerprintSolo {
@@ -431,29 +440,29 @@ workflow JointGenotyping {
     }
   }
 
-  # Get the metrics from either code path
-  File output_detail_metrics_file = select_first([CollectMetricsOnFullVcf.detail_metrics_file, GatherVariantCallingMetrics.detail_metrics_file])
-  File output_summary_metrics_file = select_first([CollectMetricsOnFullVcf.summary_metrics_file, GatherVariantCallingMetrics.summary_metrics_file])
+  # # Get the metrics from either code path
+  # String output_detail_metrics_file = select_first([CollectMetricsOnFullVcf.detail_metrics_file, GatherVariantCallingMetrics.detail_metrics_file])
+  # String output_summary_metrics_file = select_first([CollectMetricsOnFullVcf.summary_metrics_file, GatherVariantCallingMetrics.summary_metrics_file])
 
-  # Get the VCFs from either code path
-  Array[File?] output_vcf_files = if defined(FinalGatherVcf.output_vcf) then [FinalGatherVcf.output_vcf] else ApplyRecalibration.recalibrated_vcf
-  Array[File?] output_vcf_index_files = if defined(FinalGatherVcf.output_vcf_index) then [FinalGatherVcf.output_vcf_index] else ApplyRecalibration.recalibrated_vcf_index
+  # # Get the VCFs from either code path
+  # Array[String?] output_vcf_files = if defined(FinalGatherVcf.output_vcf) then [FinalGatherVcf.output_vcf] else ApplyRecalibration.recalibrated_vcf
+  # Array[String?] output_vcf_index_files = if defined(FinalGatherVcf.output_vcf_index) then [FinalGatherVcf.output_vcf_index] else ApplyRecalibration.recalibrated_vcf_index
 
-  output {
-    # Metrics from either the small or large callset
-    File detail_metrics_file = output_detail_metrics_file
-    File summary_metrics_file = output_summary_metrics_file
+  # output {
+  #   # Metrics from either the small or large callset
+  #   String detail_metrics_file = output_detail_metrics_file
+  #   String summary_metrics_file = output_summary_metrics_file
 
-    # Outputs from the small callset path through the wdl.
-    Array[File] output_vcfs = select_all(output_vcf_files)
-    Array[File] output_vcf_indices = select_all(output_vcf_index_files)
+  #   # Outputs from the small callset path through the wdl.
+  #   Array[String] output_vcfs = select_all(output_vcf_files)
+  #   Array[String] output_vcf_indices = select_all(output_vcf_index_files)
 
-    # Output the interval list generated/used by this run workflow.
-    Array[File] output_intervals = SplitIntervalList.output_intervals
+  #   # Output the interval list generated/used by this run workflow.
+  #   Array[String] output_intervals = SplitIntervalList.output_intervals
 
-    # Output the metrics from crosschecking fingerprints.
-    File crosscheck_fingerprint_check = select_first([CrossCheckFingerprintSolo.crosscheck_metrics, GatherFingerprintingMetrics.gathered_metrics])
-  }
+  #   # # Output the metrics from crosschecking fingerprints.
+  #   # String crosscheck_fingerprint_check = select_first([CrossCheckFingerprintSolo.crosscheck_metrics, GatherFingerprintingMetrics.gathered_metrics])
+  # }
   meta {
     allowNestedInputs: true
   }

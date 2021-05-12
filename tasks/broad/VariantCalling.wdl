@@ -8,24 +8,24 @@ import "../../tasks/broad/BamProcessing.wdl" as BamProcessing
 workflow VariantCalling {
 
   input {
-    File calling_interval_list
-    File evaluation_interval_list
+    String calling_interval_list
+    String evaluation_interval_list
     Int haplotype_scatter_count
     Int break_bands_at_multiples_of
     Float? contamination
-    File input_bam
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
-    File dbsnp_vcf
-    File dbsnp_vcf_index
+    String input_bam
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
+    String dbsnp_vcf
+    String dbsnp_vcf_index
     String base_file_name
     String final_vcf_base_name
     Int agg_preemptible_tries
     Boolean make_gvcf = true
-    Boolean make_bamout = false
-    Boolean use_gatk3_haplotype_caller = false
+    String interval_dir = interval_dir
   }
+    Boolean make_bamout = false
 
   parameter_meta {
     make_bamout: "For CNNScoreVariants to run with a 2D model, a bamout must be created by HaplotypeCaller. The bamout is a bam containing information on how HaplotypeCaller remapped reads while it was calling variants. See https://gatkforums.broadinstitute.org/gatk/discussion/5484/howto-generate-a-bamout-file-showing-how-haplotypecaller-has-remapped-sequence-reads for more details."
@@ -37,7 +37,8 @@ workflow VariantCalling {
     input:
       interval_list = calling_interval_list,
       scatter_count = haplotype_scatter_count,
-      break_bands_at_multiples_of = break_bands_at_multiples_of
+      break_bands_at_multiples_of = break_bands_at_multiples_of,
+      interval_dir = interval_dir
   }
 
   # We need disk to localize the sharded input and output due to the scatter for HaplotypeCaller.
@@ -49,53 +50,35 @@ workflow VariantCalling {
   # Call variants in parallel over WGS calling intervals
   scatter (scattered_interval_list in ScatterIntervalList.out) {
 
-    if (use_gatk3_haplotype_caller) {
-      call Calling.HaplotypeCaller_GATK35_GVCF as HaplotypeCallerGATK3 {
-        input:
+    # Generate GVCF by interval
+    call Calling.HaplotypeCaller_GATK4_VCF as HaplotypeCallerGATK4 {
+      input:
+        contamination = contamination,
         input_bam = input_bam,
         interval_list = scattered_interval_list,
-        gvcf_basename = base_file_name,
+        vcf_basename = base_file_name,
         ref_dict = ref_dict,
         ref_fasta = ref_fasta,
         ref_fasta_index = ref_fasta_index,
-        contamination = contamination,
-        preemptible_tries = agg_preemptible_tries,
-        hc_scatter = hc_divisor
+        hc_scatter = hc_divisor,
+        make_gvcf = make_gvcf,
+        make_bamout = make_bamout,
+        preemptible_tries = agg_preemptible_tries
       }
-    }
 
-    if (!use_gatk3_haplotype_caller) {
+    # # If bamout files were created, we need to sort and gather them into one bamout
+    # if (make_bamout) {
+    #   call BamProcessing.SortSam as SortBamout {
+    #     input:
+    #       input_bam = HaplotypeCallerGATK4.bamout,
+    #       output_bam_basename = final_vcf_base_name,
+    #       preemptible_tries = agg_preemptible_tries,
+    #       compression_level = 2
+    #   }
+    # }
 
-      # Generate GVCF by interval
-      call Calling.HaplotypeCaller_GATK4_VCF as HaplotypeCallerGATK4 {
-        input:
-          contamination = contamination,
-          input_bam = input_bam,
-          interval_list = scattered_interval_list,
-          vcf_basename = base_file_name,
-          ref_dict = ref_dict,
-          ref_fasta = ref_fasta,
-          ref_fasta_index = ref_fasta_index,
-          hc_scatter = hc_divisor,
-          make_gvcf = make_gvcf,
-          make_bamout = make_bamout,
-          preemptible_tries = agg_preemptible_tries
-       }
-
-      # If bamout files were created, we need to sort and gather them into one bamout
-      if (make_bamout) {
-        call BamProcessing.SortSam as SortBamout {
-          input:
-            input_bam = HaplotypeCallerGATK4.bamout,
-            output_bam_basename = final_vcf_base_name,
-            preemptible_tries = agg_preemptible_tries,
-            compression_level = 2
-        }
-      }
-    }
-
-    File vcfs_to_merge = select_first([HaplotypeCallerGATK3.output_gvcf, HaplotypeCallerGATK4.output_vcf])
-    File vcf_indices_to_merge = select_first([HaplotypeCallerGATK3.output_gvcf_index, HaplotypeCallerGATK4.output_vcf_index])
+    String vcfs_to_merge = HaplotypeCallerGATK4.output_vcf
+    String vcf_indices_to_merge = HaplotypeCallerGATK4.output_vcf_index
   }
 
   # Combine by-interval (g)VCFs into a single sample (g)VCF file
@@ -108,13 +91,13 @@ workflow VariantCalling {
       preemptible_tries = agg_preemptible_tries
   }
 
-  if (make_bamout) {
-    call MergeBamouts {
-      input:
-        bams = select_all(SortBamout.output_bam),
-        output_base_name = final_vcf_base_name
-    }
-  }
+  # if (make_bamout) {
+  # call MergeBamouts {
+  #   input:
+  #     bams = select_all(SortBamout.output_bam),
+  #     output_base_name = final_vcf_base_name
+  # }
+  # }
 
   # Validate the (g)VCF output of HaplotypeCaller
   call QC.ValidateVCF as ValidateVCF {
@@ -146,44 +129,45 @@ workflow VariantCalling {
   }
 
   output {
-    File vcf_summary_metrics = CollectVariantCallingMetrics.summary_metrics
-    File vcf_detail_metrics = CollectVariantCallingMetrics.detail_metrics
-    File output_vcf = MergeVCFs.output_vcf
-    File output_vcf_index = MergeVCFs.output_vcf_index
-    File? bamout = MergeBamouts.output_bam
-    File? bamout_index = MergeBamouts.output_bam_index
+    String vcf_summary_metrics = CollectVariantCallingMetrics.summary_metrics
+    String vcf_detail_metrics = CollectVariantCallingMetrics.detail_metrics
+    String output_vcf = MergeVCFs.output_vcf
+    String output_vcf_index = MergeVCFs.output_vcf_index
+    # String bamout = MergeBamouts.output_bam
+    # String bamout_index = MergeBamouts.output_bam_index
   }
   meta {
     allowNestedInputs: true
   }
 }
 
-# This task is here because merging bamout files using Picard produces an error.
-task MergeBamouts {
+# # This task is here because merging bamout files using Picard produces an error.
+# task MergeBamouts {
 
-  input {
-    Array[File] bams
-    String output_base_name
-  }
+#   input {
+#     Array[String] bams
+#     String output_base_name
+#   }
 
-  Int disk_size = ceil(size(bams, "GiB") * 2) + 10
+#   # Int disk_size = ceil(size(bams, "GiB") * 2) + 10
 
-  command {
-    samtools merge ~{output_base_name}.bam ~{sep=" " bams}
-    samtools index ~{output_base_name}.bam
-    mv ~{output_base_name}.bam.bai ~{output_base_name}.bai
-  }
+#   command {
+#     samtools merge ~{output_base_name}.bam ~{sep=" " bams}
+#     samtools index ~{output_base_name}.bam
+#     mv ~{output_base_name}.bam.bai ~{output_base_name}.bai
+#   }
 
-  output {
-    File output_bam = "~{output_base_name}.bam"
-    File output_bam_index = "~{output_base_name}.bai"
-  }
+#   output {
+#     String output_bam = "~{output_base_name}.bam"
+#     # String output_bam_index = "~{output_base_name}.bai"
+#     String output_bam_index = "~{output_base_name}.bai"
+#   }
 
-  runtime {
-    docker: "biocontainers/samtools:1.3.1"
-    memory: "4 GiB"
-    disks: "local-disk ~{disk_size} HDD"
-    preemptible: 3
-    cpu: 1
-  }
-}
+  # runtime {
+  #   docker: "biocontainers/samtools:1.3.1"
+  #   memory: "4 GiB"
+  #   disks: "local-disk ~{disk_size} HDD"
+  #   preemptible: 3
+  #   cpu: 1
+  # }
+# }

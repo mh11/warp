@@ -21,16 +21,16 @@ import "../../structs/dna_seq/DNASeqStructs.wdl"
 # WORKFLOW DEFINITION
 workflow AggregatedBamQC {
 input {
-    File base_recalibrated_bam
-    File base_recalibrated_bam_index
+    String base_recalibrated_bam
+    String base_recalibrated_bam_index
     String base_name
     String sample_name
     String recalibrated_bam_base_name
-    File haplotype_database_file
+    String haplotype_database_file
     DNASeqSingleSampleReferences references
     PapiSettings papi_settings
-    File? fingerprint_genotypes_file
-    File? fingerprint_genotypes_index
+    String? fingerprint_genotypes_file
+    String? fingerprint_genotypes_index
   }
 
   # QC the final BAM (consolidated after scattered BQSR)
@@ -50,7 +50,7 @@ input {
     input:
       input_bam = base_recalibrated_bam,
       input_bam_index = base_recalibrated_bam_index,
-      output_bam_prefix = base_name,
+      output_bam_prefix = base_name + ".qc", ## to have separate namespace
       ref_dict = references.reference_fasta.ref_dict,
       ref_fasta = references.reference_fasta.ref_fasta,
       ref_fasta_index = references.reference_fasta.ref_fasta_index,
@@ -82,31 +82,28 @@ input {
   }
 
   output {
-    File read_group_alignment_summary_metrics = CollectReadgroupBamQualityMetrics.alignment_summary_metrics
-    File read_group_gc_bias_detail_metrics = CollectReadgroupBamQualityMetrics.gc_bias_detail_metrics
-    File read_group_gc_bias_pdf = CollectReadgroupBamQualityMetrics.gc_bias_pdf
-    File read_group_gc_bias_summary_metrics = CollectReadgroupBamQualityMetrics.gc_bias_summary_metrics
+    String read_group_alignment_summary_metrics = CollectReadgroupBamQualityMetrics.alignment_summary_metrics
+    String read_group_gc_bias_detail_metrics = CollectReadgroupBamQualityMetrics.gc_bias_detail_metrics
+    String read_group_gc_bias_pdf = CollectReadgroupBamQualityMetrics.gc_bias_pdf
+    String read_group_gc_bias_summary_metrics = CollectReadgroupBamQualityMetrics.gc_bias_summary_metrics
 
-    File calculate_read_group_checksum_md5 = CalculateReadGroupChecksum.md5_file
+    String calculate_read_group_checksum_md5 = CalculateReadGroupChecksum.md5_file
 
-    File agg_alignment_summary_metrics = CollectAggregationMetrics.alignment_summary_metrics
-    File agg_bait_bias_detail_metrics = CollectAggregationMetrics.bait_bias_detail_metrics
-    File agg_bait_bias_summary_metrics = CollectAggregationMetrics.bait_bias_summary_metrics
-    File agg_gc_bias_detail_metrics = CollectAggregationMetrics.gc_bias_detail_metrics
-    File agg_gc_bias_pdf = CollectAggregationMetrics.gc_bias_pdf
-    File agg_gc_bias_summary_metrics = CollectAggregationMetrics.gc_bias_summary_metrics
-    File agg_insert_size_histogram_pdf = CollectAggregationMetrics.insert_size_histogram_pdf
-    File agg_insert_size_metrics = CollectAggregationMetrics.insert_size_metrics
-    File agg_pre_adapter_detail_metrics = CollectAggregationMetrics.pre_adapter_detail_metrics
-    File agg_pre_adapter_summary_metrics = CollectAggregationMetrics.pre_adapter_summary_metrics
-    File agg_quality_distribution_pdf = CollectAggregationMetrics.quality_distribution_pdf
-    File agg_quality_distribution_metrics = CollectAggregationMetrics.quality_distribution_metrics
-    File agg_error_summary_metrics = CollectAggregationMetrics.error_summary_metrics
+    String agg_alignment_summary_metrics = CollectAggregationMetrics.alignment_summary_metrics
+    String agg_bait_bias_detail_metrics = CollectAggregationMetrics.bait_bias_detail_metrics
+    String agg_bait_bias_summary_metrics = CollectAggregationMetrics.bait_bias_summary_metrics
+    String agg_gc_bias_detail_metrics = CollectAggregationMetrics.gc_bias_detail_metrics
+    String agg_gc_bias_pdf = CollectAggregationMetrics.gc_bias_pdf
+    String agg_gc_bias_summary_metrics = CollectAggregationMetrics.gc_bias_summary_metrics
+    String agg_insert_size_histogram_pdf = CollectAggregationMetrics.insert_size_histogram_pdf
+    String agg_insert_size_metrics = CollectAggregationMetrics.insert_size_metrics
+    String agg_pre_adapter_detail_metrics = CollectAggregationMetrics.pre_adapter_detail_metrics
+    String agg_pre_adapter_summary_metrics = CollectAggregationMetrics.pre_adapter_summary_metrics
+    String agg_quality_distribution_pdf = CollectAggregationMetrics.quality_distribution_pdf
+    String agg_quality_distribution_metrics = CollectAggregationMetrics.quality_distribution_metrics
+    String agg_error_summary_metrics = CollectAggregationMetrics.error_summary_metrics
 
-    File? fingerprint_summary_metrics = CheckFingerprint.summary_metrics
-    File? fingerprint_detail_metrics = CheckFingerprint.detail_metrics
-  }
-  meta {
-    allowNestedInputs: true
+    String? fingerprint_summary_metrics = CheckFingerprint.summary_metrics
+    String? fingerprint_detail_metrics = CheckFingerprint.detail_metrics
   }
 }

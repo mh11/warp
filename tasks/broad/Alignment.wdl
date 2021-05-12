@@ -15,12 +15,12 @@ version 1.0
 ## page at https://hub.docker.com/r/broadinstitute/genomes-in-the-cloud/ for detailed
 ## licensing information pertaining to the included programs.
 
-import "../structs/dna_seq/DNASeqStructs.wdl"
+import "../../structs/dna_seq/DNASeqStructs.wdl"
 
 # Read unmapped BAM, convert on-the-fly to FASTQ and stream to BWA MEM for alignment, then stream to MergeBamAlignment
 task SamToFastqAndBwaMemAndMba {
   input {
-    File input_bam
+    String input_bam
     String bwa_commandline
     String output_bam_basename
 
@@ -34,6 +34,7 @@ task SamToFastqAndBwaMemAndMba {
     Boolean hard_clip_reads = false
   }
 
+  String flag_file = output_bam_basename + ".done"  # finished flag
   Float unmapped_bam_size = size(input_bam, "GiB")
   Float ref_size = size(reference_fasta.ref_fasta, "GiB") + size(reference_fasta.ref_fasta_index, "GiB") + size(reference_fasta.ref_dict, "GiB")
   Float bwa_ref_size = ref_size + size(reference_fasta.ref_alt, "GiB") + size(reference_fasta.ref_amb, "GiB") + size(reference_fasta.ref_ann, "GiB") + size(reference_fasta.ref_bwt, "GiB") + size(reference_fasta.ref_pac, "GiB") + size(reference_fasta.ref_sa, "GiB")
@@ -62,6 +63,9 @@ task SamToFastqAndBwaMemAndMba {
     bash_ref_fasta=~{reference_fasta.ref_fasta}
     # if reference_fasta.ref_alt has data in it,
     if [ -s ~{reference_fasta.ref_alt} ]; then
+    if [ -f "~{flag_file}" ]; then
+      echo "SKIP - file ~{flag_file} already exists."
+    else
       java -Xms1000m -Xmx1000m -jar /usr/gitc/picard.jar \
         SamToFastq \
         INPUT=~{input_bam} \
@@ -103,6 +107,8 @@ task SamToFastqAndBwaMemAndMba {
       grep -m1 "read .* ALT contigs" ~{output_bam_basename}.bwa.stderr.log | \
       grep -v "read 0 ALT contigs"
 
+      touch "~{flag_file}" # flag successful finish
+    fi # test file exists
     # else reference_fasta.ref_alt is empty or could not be found
     else
       exit 1;
@@ -113,17 +119,16 @@ task SamToFastqAndBwaMemAndMba {
     preemptible: preemptible_tries
     memory: "14 GiB"
     cpu: "16"
-    disks: "local-disk " + disk_size + " HDD"
   }
   output {
-    File output_bam = "~{output_bam_basename}.bam"
-    File bwa_stderr_log = "~{output_bam_basename}.bwa.stderr.log"
+    String output_bam = "~{output_bam_basename}.bam"
+    String bwa_stderr_log = "~{output_bam_basename}.bwa.stderr.log"
   }
 }
 
 task SamSplitter {
   input {
-    File input_bam
+    String input_bam
     Int n_reads
     Int preemptible_tries
     Int compression_level
@@ -147,12 +152,11 @@ task SamSplitter {
       TOTAL_READS_IN_INPUT=$total_reads
   }
   output {
-    Array[File] split_bams = glob("output_dir/*.bam")
+    Array[String] split_bams = glob("output_dir/*.bam")
   }
   runtime {
     docker: "us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.4.7-1603303710"
     preemptible: preemptible_tries
     memory: "3.75 GiB"
-    disks: "local-disk " + disk_size + " HDD"
-  }
+      }
 }

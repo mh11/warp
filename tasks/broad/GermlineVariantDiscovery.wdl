@@ -17,12 +17,12 @@ version 1.0
 
 task HaplotypeCaller_GATK35_GVCF {
   input {
-    File input_bam
-    File interval_list
+    String input_bam
+    String interval_list
     String gvcf_basename
-    File ref_dict
-    File ref_fasta
-    File ref_fasta_index
+    String ref_dict
+    String ref_fasta
+    String ref_fasta_index
     Float? contamination
     Int preemptible_tries
     Int hc_scatter
@@ -69,22 +69,21 @@ task HaplotypeCaller_GATK35_GVCF {
     preemptible: preemptible_tries
     memory: "10 GiB"
     cpu: "1"
-    disks: "local-disk " + disk_size + " HDD"
   }
   output {
-    File output_gvcf = "~{gvcf_basename}.vcf.gz"
-    File output_gvcf_index = "~{gvcf_basename}.vcf.gz.tbi"
+    String output_gvcf = "~{gvcf_basename}.vcf.gz"
+    String output_gvcf_index = "~{gvcf_basename}.vcf.gz.tbi"
   }
 }
 
 task HaplotypeCaller_GATK4_VCF {
   input {
-    File input_bam
-    File interval_list
+    String input_bam
+    String interval_list
     String vcf_basename
-    File ref_dict
-    File ref_fasta
-    File ref_fasta_index
+    String ref_dict
+    String ref_fasta
+    String ref_fasta_index
     Float? contamination
     Boolean make_gvcf
     Boolean make_bamout
@@ -93,13 +92,12 @@ task HaplotypeCaller_GATK4_VCF {
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
 
+  String scatter_vcf_basename = vcf_basename + "." + basename(interval_list, ".interval_list")
+  String flag_file = scatter_vcf_basename + ".done"
+
   String output_suffix = if make_gvcf then ".g.vcf.gz" else ".vcf.gz"
-  String output_file_name = vcf_basename + output_suffix
-
-  Float ref_size = size(ref_fasta, "GiB") + size(ref_fasta_index, "GiB") + size(ref_dict, "GiB")
-  Int disk_size = ceil(((size(input_bam, "GiB") + 30) / hc_scatter) + ref_size) + 20
-
-  String bamout_arg = if make_bamout then "-bamout ~{vcf_basename}.bamout.bam" else ""
+  String output_file_name = scatter_vcf_basename + output_suffix
+  String bamout_arg = if make_bamout then "-bamout ~{scatter_vcf_basename}.bamout.bam" else ""
 
   parameter_meta {
     input_bam: {
@@ -109,6 +107,9 @@ task HaplotypeCaller_GATK4_VCF {
 
   command <<<
     set -e
+  if [ -f "~{flag_file}" ]; then
+    echo "SKIP - file ~{flag_file} already exists."
+  else
     gatk --java-options "-Xms6000m -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
       HaplotypeCaller \
       -R ~{ref_fasta} \
@@ -122,7 +123,9 @@ task HaplotypeCaller_GATK4_VCF {
       ~{bamout_arg}
 
     # Cromwell doesn't like optional task outputs, so we have to touch this file.
-    touch ~{vcf_basename}.bamout.bam
+    touch ~{scatter_vcf_basename}.bamout.bam
+    touch ~{flag_file}
+  fi # test file exists
   >>>
 
   runtime {
@@ -131,53 +134,56 @@ task HaplotypeCaller_GATK4_VCF {
     memory: "6.5 GiB"
     cpu: "2"
     bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
   }
 
   output {
-    File output_vcf = "~{output_file_name}"
-    File output_vcf_index = "~{output_file_name}.tbi"
-    File bamout = "~{vcf_basename}.bamout.bam"
+    String output_vcf = "~{output_file_name}"
+    String output_vcf_index = "~{output_file_name}.tbi"
+    String bamout = "~{vcf_basename}.bamout.bam"
   }
 }
 
 # Combine multiple VCFs or GVCFs from scattered HaplotypeCaller runs
 task MergeVCFs {
   input {
-    Array[File] input_vcfs
-    Array[File] input_vcfs_indexes
+    Array[String] input_vcfs
+    Array[String] input_vcfs_indexes
     String output_vcf_name
     Int preemptible_tries
   }
 
-  Int disk_size = ceil(size(input_vcfs, "GiB") * 2.5) + 10
-
+  String flag_file = output_vcf_name + ".done"
   # Using MergeVcfs instead of GatherVcfs so we can create indices
   # See https://github.com/broadinstitute/picard/issues/789 for relevant GatherVcfs ticket
   command {
+  set -e
+  if [ -f "~{flag_file}" ]; then
+    echo "SKIP - file ~{flag_file} already exists."
+  else
     java -Xms2000m -jar /usr/picard/picard.jar \
       MergeVcfs \
       INPUT=~{sep=' INPUT=' input_vcfs} \
       OUTPUT=~{output_vcf_name}
+    touch ~{flag_file}
+  fi # test file exists
   }
   runtime {
     docker: "us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8"
     preemptible: preemptible_tries
     memory: "3 GiB"
-    disks: "local-disk ~{disk_size} HDD"
   }
   output {
-    File output_vcf = "~{output_vcf_name}"
-    File output_vcf_index = "~{output_vcf_name}.tbi"
+    String output_vcf = "~{output_vcf_name}"
+    String output_vcf_index = "~{output_vcf_name}.tbi"
   }
 }
 
 task HardFilterVcf {
   input {
-    File input_vcf
-    File input_vcf_index
+    String input_vcf
+    String input_vcf_index
     String vcf_basename
-    File interval_list
+    String interval_list
     Int preemptible_tries
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
@@ -195,28 +201,27 @@ task HardFilterVcf {
       -O ~{output_vcf_name}
   }
   output {
-    File output_vcf = "~{output_vcf_name}"
-    File output_vcf_index = "~{output_vcf_name}.tbi"
-  }
+      String output_vcf = "~{output_vcf_name}"
+      String output_vcf_index = "~{output_vcf_name}.tbi"
+    }
   runtime {
     docker: gatk_docker
     preemptible: preemptible_tries
     memory: "3 GiB"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
   }
 }
 
 task CNNScoreVariants {
+
   input {
-    File? bamout
-    File? bamout_index
-    File input_vcf
-    File input_vcf_index
+    String? bamout
+    String? bamout_index
+    String input_vcf
+    String input_vcf_index
     String vcf_basename
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
     Int preemptible_tries
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
@@ -243,8 +248,8 @@ task CNNScoreVariants {
   }
 
   output {
-    File scored_vcf = "~{output_vcf}"
-    File scored_vcf_index = "~{output_vcf_index}"
+    String scored_vcf = "~{output_vcf}"
+    String scored_vcf_index = "~{output_vcf_index}"
   }
 
   runtime {
@@ -253,26 +258,25 @@ task CNNScoreVariants {
     memory: "15 GiB"
     cpu: "2"
     bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
   }
 }
 
 task FilterVariantTranches {
 
   input {
-    File input_vcf
-    File input_vcf_index
+    String input_vcf
+    String input_vcf_index
     String vcf_basename
     Array[String] snp_tranches
     Array[String] indel_tranches
-    File hapmap_resource_vcf
-    File hapmap_resource_vcf_index
-    File omni_resource_vcf
-    File omni_resource_vcf_index
-    File one_thousand_genomes_resource_vcf
-    File one_thousand_genomes_resource_vcf_index
-    File dbsnp_resource_vcf
-    File dbsnp_resource_vcf_index
+    String hapmap_resource_vcf
+    String hapmap_resource_vcf_index
+    String omni_resource_vcf
+    String omni_resource_vcf_index
+    String one_thousand_genomes_resource_vcf
+    String one_thousand_genomes_resource_vcf_index
+    String dbsnp_resource_vcf
+    String dbsnp_resource_vcf_index
     String info_key
     Int preemptible_tries
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
@@ -286,7 +290,7 @@ task FilterVariantTranches {
                       ) + 20
 
   command {
-
+    set -e
     gatk --java-options -Xmx6g FilterVariantTranches \
       -V ~{input_vcf} \
       -O ~{vcf_basename}.filtered.vcf.gz \
@@ -301,15 +305,14 @@ task FilterVariantTranches {
   }
 
   output {
-    File filtered_vcf = "~{vcf_basename}.filtered.vcf.gz"
-    File filtered_vcf_index = "~{vcf_basename}.filtered.vcf.gz.tbi"
+    String filtered_vcf = "~{vcf_basename}.filtered.vcf.gz"
+    String filtered_vcf_index = "~{vcf_basename}.filtered.vcf.gz.tbi"
   }
 
   runtime {
     memory: "7 GiB"
     cpu: "2"
     bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
     preemptible: preemptible_tries
     docker: gatk_docker
   }

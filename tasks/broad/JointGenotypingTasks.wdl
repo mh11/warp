@@ -3,7 +3,7 @@ version 1.0
 
 task CheckSamplesUnique {
   input {
-    File sample_name_map
+    String sample_name_map
     Int sample_num_threshold = 50
   }
 
@@ -28,9 +28,8 @@ task CheckSamplesUnique {
   }
 
   runtime {
-    memory: "1 GiB"
-    preemptible: 1
-    disks: "local-disk 10 HDD"
+    memory: "1G"
+
     docker: "us.gcr.io/broad-gotc-prod/python:2.7"
   }
 }
@@ -38,50 +37,48 @@ task CheckSamplesUnique {
 task SplitIntervalList {
 
   input {
-    File interval_list
+    String interval_list
     Int scatter_count
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
     Boolean sample_names_unique_done
     Int disk_size
     String scatter_mode = "BALANCING_WITHOUT_INTERVAL_SUBDIVISION_WITH_OVERFLOW"
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
+    String scatterDir = 'scatterDir'
   }
-
-  parameter_meta {
-    interval_list: {
-      localization_optional: true
-    }
-  }
+  String tmp_file_list = "list_files.tsv"
 
   command <<<
-    gatk --java-options -Xms3g SplitIntervals \
-      -L ~{interval_list} -O  scatterDir -scatter ~{scatter_count} -R ~{ref_fasta} \
-      -mode ~{scatter_mode} --interval-merging-rule OVERLAPPING_ONLY
+    ## if not generated already
+    if [ ! -d "~{scatterDir}" ]; then 
+      gatk --java-options -Xms3g SplitIntervals \
+        -L ~{interval_list} -O  ~{scatterDir} -scatter ~{scatter_count} -R ~{ref_fasta} \
+        -mode ~{scatter_mode} --interval-merging-rule OVERLAPPING_ONLY
+    fi
+    # list files to read in afterwards
+    ls ~{scatterDir}/*.interval_list > ~{tmp_file_list}
     >>>
 
   runtime {
     memory: "3.75 GiB"
-    preemptible: 1
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
     docker: gatk_docker
   }
 
   output {
-    Array[File] output_intervals = glob("scatterDir/*")
+    Array[String] output_intervals = read_lines("~{tmp_file_list}")
   }
 }
 
 task ImportGVCFs {
 
   input {
-    File sample_name_map
-    File interval
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String sample_name_map
+    String interval
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
 
     String workspace_dir_name
 
@@ -91,11 +88,22 @@ task ImportGVCFs {
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
 
+  String scatter_workspace_dir_name = workspace_dir_name + "." + basename(interval, "-scattered.interval_list")
+
   command <<<
     set -euo pipefail
 
-    rm -rf ~{workspace_dir_name}
+    # rm -rf ~{scatter_workspace_dir_name}
 
+    odir=$(dirname ~{scatter_workspace_dir_name})
+    bname=$(basename ~{scatter_workspace_dir_name})
+    gdbmode="--genomicsdb-workspace-path"
+    ## if DB already exists - update DB instead of creating new
+    if [ -d "~{scatter_workspace_dir_name}" ]; then
+       gdbmode="--genomicsdb-update-workspace-path"  
+    fi
+    # use tar as flag: if tar doesn't exist -> run
+    if [ ! -e "~{scatter_workspace_dir_name}.tar" ]; then 
     # We've seen some GenomicsDB performance regressions related to intervals, so we're going to pretend we only have a single interval
     # using the --merge-input-intervals arg
     # There's no data in between since we didn't run HaplotypeCaller over those loci so we're not wasting any compute
@@ -107,7 +115,7 @@ task ImportGVCFs {
     # does not scale well beyond 5 threads, so don't increase beyond that.
     gatk --java-options -Xms8g \
       GenomicsDBImport \
-      --genomicsdb-workspace-path ~{workspace_dir_name} \
+      ${gdbmode} ~{scatter_workspace_dir_name} \
       --batch-size ~{batch_size} \
       -L ~{interval} \
       --sample-name-map ~{sample_name_map} \
@@ -115,34 +123,34 @@ task ImportGVCFs {
       --merge-input-intervals \
       --consolidate
 
-    tar -cf ~{workspace_dir_name}.tar ~{workspace_dir_name}
+
+    tar -cf ~{scatter_workspace_dir_name}.tar -C $odir $bname
+
+    fi
   >>>
 
   runtime {
     memory: "26 GiB"
     cpu: 4
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
     docker: gatk_docker
-    preemptible: 1
   }
 
   output {
-    File output_genomicsdb = "~{workspace_dir_name}.tar"
+    String output_genomicsdb = "~{scatter_workspace_dir_name}.tar"
   }
 }
 
 task GenotypeGVCFs {
 
   input {
-    File workspace_tar
-    File interval
+    String workspace_tar
+    String interval
 
     String output_vcf_filename
 
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
 
     String dbsnp_vcf
 
@@ -161,8 +169,10 @@ task GenotypeGVCFs {
   command <<<
     set -euo pipefail
 
-    tar -xf ~{workspace_tar}
-    WORKSPACE=$(basename ~{workspace_tar} .tar)
+    # tar -xf ~{workspace_tar}
+    WS_DIR=$(dirname ~{workspace_tar})
+    WORKSPACE_NAME=$(basename ~{workspace_tar} .tar)
+    WORKSPACE="${WS_DIR}/${WORKSPACE_NAME}"
 
     gatk --java-options -Xms8g \
       GenotypeGVCFs \
@@ -179,28 +189,25 @@ task GenotypeGVCFs {
 
   runtime {
     memory: "26 GiB"
-    cpu: 2
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
+    cpu: 3
     docker: gatk_docker
   }
 
   output {
-    File output_vcf = "~{output_vcf_filename}"
-    File output_vcf_index = "~{output_vcf_filename}.tbi"
+    String output_vcf = "~{output_vcf_filename}"
+    String output_vcf_index = "~{output_vcf_filename}.tbi"
   }
 }
 
 task GnarlyGenotyper {
 
   input {
-    File workspace_tar
-    File interval
+    String workspace_tar
+    String interval
     String output_vcf_filename
-    File ref_fasta
-    File ref_fasta_index
-    File ref_dict
+    String ref_fasta
+    String ref_fasta_index
+    String ref_dict
     String dbsnp_vcf
 
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
@@ -236,25 +243,22 @@ task GnarlyGenotyper {
   runtime {
     memory: "26 GiB"
     cpu: 2
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File output_vcf = "~{output_vcf_filename}"
-    File output_vcf_index = "~{output_vcf_filename}.tbi"
-    File output_database = "annotationDB.vcf.gz"
-    File output_database_index = "annotationDB.vcf.gz.tbi"
+    String output_vcf = "~{output_vcf_filename}"
+    String output_vcf_index = "~{output_vcf_filename}.tbi"
+    String output_database = "annotationDB.vcf.gz"
+    String output_database_index = "annotationDB.vcf.gz.tbi"
   }
 }
 
 task HardFilterAndMakeSitesOnlyVcf {
 
   input {
-    File vcf
-    File vcf_index
+    String vcf
+    String vcf_index
     Float excess_het_threshold
 
     String variant_filtered_vcf_filename
@@ -281,19 +285,16 @@ task HardFilterAndMakeSitesOnlyVcf {
   >>>
 
   runtime {
-    memory: "3.75 GiB"
+    memory: "8 GiB"
     cpu: "1"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File variant_filtered_vcf = "~{variant_filtered_vcf_filename}"
-    File variant_filtered_vcf_index = "~{variant_filtered_vcf_filename}.tbi"
-    File sites_only_vcf = "~{sites_only_vcf_filename}"
-    File sites_only_vcf_index = "~{sites_only_vcf_filename}.tbi"
+    String variant_filtered_vcf = "~{variant_filtered_vcf_filename}"
+    String variant_filtered_vcf_index = "~{variant_filtered_vcf_filename}.tbi"
+    String sites_only_vcf = "~{sites_only_vcf_filename}"
+    String sites_only_vcf_index = "~{sites_only_vcf_filename}.tbi"
   }
 }
 
@@ -306,15 +307,15 @@ task IndelsVariantRecalibrator {
     Array[String] recalibration_tranche_values
     Array[String] recalibration_annotation_values
 
-    File sites_only_variant_filtered_vcf
-    File sites_only_variant_filtered_vcf_index
+    String sites_only_variant_filtered_vcf
+    String sites_only_variant_filtered_vcf_index
 
-    File mills_resource_vcf
-    File axiomPoly_resource_vcf
-    File dbsnp_resource_vcf
-    File mills_resource_vcf_index
-    File axiomPoly_resource_vcf_index
-    File dbsnp_resource_vcf_index
+    String mills_resource_vcf
+    String axiomPoly_resource_vcf
+    String dbsnp_resource_vcf
+    String mills_resource_vcf_index
+    String axiomPoly_resource_vcf_index
+    String dbsnp_resource_vcf_index
     Boolean use_allele_specific_annotations
     Int max_gaussians = 4
 
@@ -343,17 +344,14 @@ task IndelsVariantRecalibrator {
 
   runtime {
     memory: "26 GiB"
-    cpu: "2"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
+    cpu: "3"
     docker: gatk_docker
   }
 
   output {
-    File recalibration = "~{recalibration_filename}"
-    File recalibration_index = "~{recalibration_filename}.idx"
-    File tranches = "~{tranches_filename}"
+    String recalibration = "~{recalibration_filename}"
+    String recalibration_index = "~{recalibration_filename}.idx"
+    String tranches = "~{tranches_filename}"
   }
 }
 
@@ -368,17 +366,17 @@ task SNPsVariantRecalibratorCreateModel {
     Array[String] recalibration_tranche_values
     Array[String] recalibration_annotation_values
 
-    File sites_only_variant_filtered_vcf
-    File sites_only_variant_filtered_vcf_index
+    String sites_only_variant_filtered_vcf
+    String sites_only_variant_filtered_vcf_index
 
-    File hapmap_resource_vcf
-    File omni_resource_vcf
-    File one_thousand_genomes_resource_vcf
-    File dbsnp_resource_vcf
-    File hapmap_resource_vcf_index
-    File omni_resource_vcf_index
-    File one_thousand_genomes_resource_vcf_index
-    File dbsnp_resource_vcf_index
+    String hapmap_resource_vcf
+    String omni_resource_vcf
+    String one_thousand_genomes_resource_vcf
+    String dbsnp_resource_vcf
+    String hapmap_resource_vcf_index
+    String omni_resource_vcf_index
+    String one_thousand_genomes_resource_vcf_index
+    String dbsnp_resource_vcf_index
     Boolean use_allele_specific_annotations
     Int max_gaussians = 6
 
@@ -411,14 +409,11 @@ task SNPsVariantRecalibratorCreateModel {
   runtime {
     memory: "104 GiB"
     cpu: "2"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File model_report = "~{model_report_filename}"
+    String model_report = "~{model_report_filename}"
   }
 }
 
@@ -427,22 +422,22 @@ task SNPsVariantRecalibrator {
   input {
     String recalibration_filename
     String tranches_filename
-    File? model_report
+    String? model_report
 
     Array[String] recalibration_tranche_values
     Array[String] recalibration_annotation_values
 
-    File sites_only_variant_filtered_vcf
-    File sites_only_variant_filtered_vcf_index
+    String sites_only_variant_filtered_vcf
+    String sites_only_variant_filtered_vcf_index
 
-    File hapmap_resource_vcf
-    File omni_resource_vcf
-    File one_thousand_genomes_resource_vcf
-    File dbsnp_resource_vcf
-    File hapmap_resource_vcf_index
-    File omni_resource_vcf_index
-    File one_thousand_genomes_resource_vcf_index
-    File dbsnp_resource_vcf_index
+    String hapmap_resource_vcf
+    String omni_resource_vcf
+    String one_thousand_genomes_resource_vcf
+    String dbsnp_resource_vcf
+    String hapmap_resource_vcf_index
+    String omni_resource_vcf_index
+    String one_thousand_genomes_resource_vcf_index
+    String dbsnp_resource_vcf_index
     Boolean use_allele_specific_annotations
     Int max_gaussians = 6
 
@@ -458,7 +453,7 @@ task SNPsVariantRecalibrator {
                               one_thousand_genomes_resource_vcf,
                               dbsnp_resource_vcf],
                       "GiB"))
-  Int machine_mem = select_first([machine_mem_gb, if auto_mem < 7 then 7 else auto_mem])
+  Int machine_mem = select_first([machine_mem_gb, if auto_mem < 8 then 8 else auto_mem])
   Int java_mem = machine_mem - 1
 
 
@@ -490,39 +485,30 @@ task SNPsVariantRecalibrator {
   runtime {
     memory: "~{machine_mem} GiB"
     cpu: 2
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File recalibration = "~{recalibration_filename}"
-    File recalibration_index = "~{recalibration_filename}.idx"
-    File tranches = "~{tranches_filename}"
+    String recalibration = "~{recalibration_filename}"
+    String recalibration_index = "~{recalibration_filename}.idx"
+    String tranches = "~{tranches_filename}"
   }
 }
 
 task GatherTranches {
 
   input {
-    Array[File] tranches
+    Array[String] tranches_in
     String output_filename
     String mode
     Int disk_size
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
 
-  parameter_meta {
-    tranches: {
-      localization_optional: true
-    }
-  }
-
   command <<<
     set -euo pipefail
 
-    tranches_fofn=~{write_lines(tranches)}
+    tranches_fofn=~{write_lines(tranches_in)}
 
     # Jose says:
     # Cromwell will fall over if we have it try to localize tens of thousands of files,
@@ -556,14 +542,11 @@ task GatherTranches {
   runtime {
     memory: "7.5 GiB"
     cpu: "2"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File tranches = "~{output_filename}"
+    String tranches = "~{output_filename}"
   }
 }
 
@@ -571,14 +554,14 @@ task ApplyRecalibration {
 
   input {
     String recalibrated_vcf_filename
-    File input_vcf
-    File input_vcf_index
-    File indels_recalibration
-    File indels_recalibration_index
-    File indels_tranches
-    File snps_recalibration
-    File snps_recalibration_index
-    File snps_tranches
+    String input_vcf
+    String input_vcf_index
+    String indels_recalibration
+    String indels_recalibration_index
+    String indels_tranches
+    String snps_recalibration
+    String snps_recalibration_index
+    String snps_tranches
     Float indel_filter_level
     Float snp_filter_level
     Boolean use_allele_specific_annotations
@@ -615,22 +598,19 @@ task ApplyRecalibration {
   runtime {
     memory: "7 GiB"
     cpu: "1"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File recalibrated_vcf = "~{recalibrated_vcf_filename}"
-    File recalibrated_vcf_index = "~{recalibrated_vcf_filename}.tbi"
+    String recalibrated_vcf = "~{recalibrated_vcf_filename}"
+    String recalibrated_vcf_index = "~{recalibrated_vcf_filename}.tbi"
   }
 }
 
 task GatherVcfs {
 
   input {
-    Array[File] input_vcfs
+    Array[String] input_vcfs
     String output_vcf_name
     Int disk_size
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
@@ -659,25 +639,22 @@ task GatherVcfs {
   >>>
 
   runtime {
-    memory: "7 GiB"
+    memory: "8 GiB"
     cpu: "1"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File output_vcf = "~{output_vcf_name}"
-    File output_vcf_index = "~{output_vcf_name}.tbi"
+    String output_vcf = "~{output_vcf_name}"
+    String output_vcf_index = "~{output_vcf_name}.tbi"
   }
 }
 
 task SelectFingerprintSiteVariants {
 
   input {
-    File input_vcf
-    File haplotype_database
+    String input_vcf
+    String haplotype_database
     String base_output_name
     Int disk_size
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
@@ -707,30 +684,27 @@ task SelectFingerprintSiteVariants {
   >>>
 
   runtime {
-    memory: "7.5 GiB"
+    memory: "8 GiB"
     cpu: 1
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File output_vcf = "~{base_output_name}.vcf.gz"
-    File output_vcf_index = "~{base_output_name}.vcf.gz.tbi"
+    String output_vcf = "~{base_output_name}.vcf.gz"
+    String output_vcf_index = "~{base_output_name}.vcf.gz.tbi"
   }
 }
 
 task CollectVariantCallingMetrics {
 
   input {
-    File input_vcf
-    File input_vcf_index
+    String input_vcf
+    String input_vcf_index
     String metrics_filename_prefix
-    File dbsnp_vcf
-    File dbsnp_vcf_index
-    File interval_list
-    File ref_dict
+    String dbsnp_vcf
+    String dbsnp_vcf_index
+    String interval_list
+    String ref_dict
     Int disk_size
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
@@ -749,16 +723,13 @@ task CollectVariantCallingMetrics {
   >>>
 
   output {
-    File detail_metrics_file = "~{metrics_filename_prefix}.variant_calling_detail_metrics"
-    File summary_metrics_file = "~{metrics_filename_prefix}.variant_calling_summary_metrics"
+    String detail_metrics_file = "~{metrics_filename_prefix}.variant_calling_detail_metrics"
+    String summary_metrics_file = "~{metrics_filename_prefix}.variant_calling_summary_metrics"
   }
 
   runtime {
-    memory: "7.5 GiB"
-    cpu: 2
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
+    memory: "8 GiB"
+    cpu: 1
     docker: gatk_docker
   }
 }
@@ -766,8 +737,8 @@ task CollectVariantCallingMetrics {
 task GatherVariantCallingMetrics {
 
   input {
-    Array[File] input_details
-    Array[File] input_summaries
+    Array[String] input_details
+    Array[String] input_summaries
     String output_prefix
     Int disk_size
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
@@ -829,29 +800,27 @@ task GatherVariantCallingMetrics {
   runtime {
     memory: "3 GiB"
     cpu: "1"
-    bootDiskSizeGb: 15
-    disks: "local-disk " + disk_size + " HDD"
-    preemptible: 1
     docker: gatk_docker
   }
 
   output {
-    File detail_metrics_file = "~{output_prefix}.variant_calling_detail_metrics"
-    File summary_metrics_file = "~{output_prefix}.variant_calling_summary_metrics"
+    String detail_metrics_file = "~{output_prefix}.variant_calling_detail_metrics"
+    String summary_metrics_file = "~{output_prefix}.variant_calling_summary_metrics"
   }
 }
 
 task CrossCheckFingerprint {
 
   input {
-    Array[File] gvcf_paths
-    Array[File] vcf_paths
-    File sample_name_map
-    File haplotype_database
+    Array[String] gvcf_paths
+    Array[String] vcf_paths
+    String sample_name_map
+    String haplotype_database
     String output_base_name
     Boolean scattered = false
     Array[String] expected_inconclusive_samples = []
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
+    Int max_cpus=12
   }
 
   parameter_meta {
@@ -864,7 +833,7 @@ task CrossCheckFingerprint {
   }
 
   Int num_gvcfs = length(gvcf_paths)
-  Int cpu = if num_gvcfs < 32 then num_gvcfs else 32
+  Int cpu = if num_gvcfs < max_cpus then num_gvcfs else max_cpus
   # Compute memory to use based on the CPU count, following the pattern of
   # 3.75GiB / cpu used by GCP's pricing: https://cloud.google.com/compute/pricing
   Int memMb = round(cpu * 3.75 * 1024)
@@ -919,20 +888,18 @@ task CrossCheckFingerprint {
 
   runtime {
     memory: memMb + " MiB"
-    disks: "local-disk " + disk + " HDD"
-    preemptible: 0
     docker: gatk_docker
   }
 
   output {
-    File crosscheck_metrics = output_name
+    String crosscheck_metrics = output_name
   }
 }
 
 task GatherPicardMetrics {
 
   input {
-    Array[File] metrics_files
+    Array[String] metrics_files
     String output_file_name
     Int disk_size
   }
@@ -951,14 +918,12 @@ task GatherPicardMetrics {
   }
 
   output {
-    File gathered_metrics = "~{output_file_name}"
+    String gathered_metrics = "~{output_file_name}"
   }
 
   runtime {
     cpu: 1
     memory: "3.75 GiB"
-    preemptible: 1
-    disks: "local-disk " + disk_size + " HDD"
     docker: "us.gcr.io/broad-gotc-prod/python:2.7"
   }
 }
@@ -966,8 +931,8 @@ task GatherPicardMetrics {
 task GetFingerprintingIntervalIndices {
 
   input {
-    Array[File] unpadded_intervals
-    File haplotype_database
+    Array[String] unpadded_intervals
+    String haplotype_database
     String gatk_docker = "us.gcr.io/broad-gatk/gatk:4.1.8.0"
   }
 
@@ -1026,17 +991,14 @@ task GetFingerprintingIntervalIndices {
 
   output {
     Array[String] indices_to_fingerprint = read_lines("indices.out")
-    File all_sorted_interval_list = "all.sorted.interval_list"
-    File all_interval_list = "all.interval_list"
-    File hdb_interval_list = "hdb.interval_list"
+    String all_sorted_interval_list = "all.sorted.interval_list"
+    String all_interval_list = "all.interval_list"
+    String hdb_interval_list = "hdb.interval_list"
   }
 
   runtime {
     cpu: 2
-    memory: "3.75 GiB"
-    preemptible: 1
-    bootDiskSizeGb: 15
-    disks: "local-disk 10 HDD"
+    memory: "8 GiB"
     docker: gatk_docker
   }
 }
@@ -1044,7 +1006,7 @@ task GetFingerprintingIntervalIndices {
 task PartitionSampleNameMap {
 
   input {
-    File sample_name_map
+    String sample_name_map
     Int line_limit
   }
 
@@ -1058,13 +1020,11 @@ task PartitionSampleNameMap {
   }
 
   output {
-    Array[File] partitions = glob("partition_*")
+    Array[String] partitions = glob("partition_*")
   }
 
   runtime {
-    memory: "1 GiB"
-    preemptible: 1
-    disks: "local-disk 10 HDD"
+    memory: "2 GiB"
     docker: "us.gcr.io/broad-gotc-prod/python:2.7"
   }
 }
