@@ -29,6 +29,7 @@ task SortSam {
   # SortSam spills to disk a lot more because we are only store 300000 records in RAM now because its faster for our data so it needs
   # more disk space.  Also it spills to disk in an uncompressed format so we need to account for that with a larger multiplier
   Int memory_size = 5 
+  Int runtime_minutes=2870
   Int java_memory_size = (memory_size - 1) * 1000
   Int min_java_mem = ceil(java_memory_size / 2)
 
@@ -53,6 +54,7 @@ task SortSam {
     docker: "us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8"
     cpu: "1"
     memory: "~{memory_size} GiB"
+    runtime_minutes: "~{runtime_minutes}"
     preemptible: preemptible_tries
   }
   output {
