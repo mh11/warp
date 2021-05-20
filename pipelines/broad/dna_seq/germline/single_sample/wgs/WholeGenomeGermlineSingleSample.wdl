@@ -46,13 +46,15 @@ workflow WholeGenomeGermlineSingleSample {
     VariantCallingScatterSettings scatter_settings
     PapiSettings papi_settings
 
-    File? fingerprint_genotypes_file
-    File? fingerprint_genotypes_index
+    String? fingerprint_genotypes_file
+    String? fingerprint_genotypes_index
 
-    File wgs_coverage_interval_list
+    String wgs_coverage_interval_list
 
     Boolean provide_bam_output = false
-    Boolean use_gatk3_haplotype_caller = true
+    
+    String interval_dir
+    String tmp_dir
   }
 
   # Not overridable:
@@ -68,6 +70,8 @@ workflow WholeGenomeGermlineSingleSample {
       sample_and_unmapped_bams    = sample_and_unmapped_bams,
       references                  = references,
       papi_settings               = papi_settings,
+      base_file_name =  sample_and_unmapped_bams.base_file_name + ".unmapped_bam_to_aligned",
+      tmp_dir = tmp_dir,
 
       contamination_sites_ud = references.contamination_sites_ud,
       contamination_sites_bed = references.contamination_sites_bed,
@@ -147,76 +151,76 @@ workflow WholeGenomeGermlineSingleSample {
       base_file_name = sample_and_unmapped_bams.base_file_name,
       final_vcf_base_name = final_gvcf_base_name,
       agg_preemptible_tries = papi_settings.agg_preemptible_tries,
-      use_gatk3_haplotype_caller = use_gatk3_haplotype_caller
+      interval_dir = interval_dir
   }
 
   if (provide_bam_output) {
-    File provided_output_bam = UnmappedBamToAlignedBam.output_bam
-    File provided_output_bam_index = UnmappedBamToAlignedBam.output_bam_index
+    String provided_output_bam = UnmappedBamToAlignedBam.output_bam
+    String provided_output_bam_index = UnmappedBamToAlignedBam.output_bam_index
   }
 
   # Outputs that will be retained when execution is complete
   output {
-    Array[File] quality_yield_metrics = UnmappedBamToAlignedBam.quality_yield_metrics
+    Array[String] quality_yield_metrics = UnmappedBamToAlignedBam.quality_yield_metrics
 
-    Array[File] unsorted_read_group_base_distribution_by_cycle_pdf = UnmappedBamToAlignedBam.unsorted_read_group_base_distribution_by_cycle_pdf
-    Array[File] unsorted_read_group_base_distribution_by_cycle_metrics = UnmappedBamToAlignedBam.unsorted_read_group_base_distribution_by_cycle_metrics
-    Array[File] unsorted_read_group_insert_size_histogram_pdf = UnmappedBamToAlignedBam.unsorted_read_group_insert_size_histogram_pdf
-    Array[File] unsorted_read_group_insert_size_metrics = UnmappedBamToAlignedBam.unsorted_read_group_insert_size_metrics
-    Array[File] unsorted_read_group_quality_by_cycle_pdf = UnmappedBamToAlignedBam.unsorted_read_group_quality_by_cycle_pdf
-    Array[File] unsorted_read_group_quality_by_cycle_metrics = UnmappedBamToAlignedBam.unsorted_read_group_quality_by_cycle_metrics
-    Array[File] unsorted_read_group_quality_distribution_pdf = UnmappedBamToAlignedBam.unsorted_read_group_quality_distribution_pdf
-    Array[File] unsorted_read_group_quality_distribution_metrics = UnmappedBamToAlignedBam.unsorted_read_group_quality_distribution_metrics
+    Array[String] unsorted_read_group_base_distribution_by_cycle_pdf = UnmappedBamToAlignedBam.unsorted_read_group_base_distribution_by_cycle_pdf
+    Array[String] unsorted_read_group_base_distribution_by_cycle_metrics = UnmappedBamToAlignedBam.unsorted_read_group_base_distribution_by_cycle_metrics
+    Array[String] unsorted_read_group_insert_size_histogram_pdf = UnmappedBamToAlignedBam.unsorted_read_group_insert_size_histogram_pdf
+    Array[String] unsorted_read_group_insert_size_metrics = UnmappedBamToAlignedBam.unsorted_read_group_insert_size_metrics
+    Array[String] unsorted_read_group_quality_by_cycle_pdf = UnmappedBamToAlignedBam.unsorted_read_group_quality_by_cycle_pdf
+    Array[String] unsorted_read_group_quality_by_cycle_metrics = UnmappedBamToAlignedBam.unsorted_read_group_quality_by_cycle_metrics
+    Array[String] unsorted_read_group_quality_distribution_pdf = UnmappedBamToAlignedBam.unsorted_read_group_quality_distribution_pdf
+    Array[String] unsorted_read_group_quality_distribution_metrics = UnmappedBamToAlignedBam.unsorted_read_group_quality_distribution_metrics
 
-    File read_group_alignment_summary_metrics = AggregatedBamQC.read_group_alignment_summary_metrics
-    File read_group_gc_bias_detail_metrics = AggregatedBamQC.read_group_gc_bias_detail_metrics
-    File read_group_gc_bias_pdf = AggregatedBamQC.read_group_gc_bias_pdf
-    File read_group_gc_bias_summary_metrics = AggregatedBamQC.read_group_gc_bias_summary_metrics
+    String read_group_alignment_summary_metrics = AggregatedBamQC.read_group_alignment_summary_metrics
+    String read_group_gc_bias_detail_metrics = AggregatedBamQC.read_group_gc_bias_detail_metrics
+    String read_group_gc_bias_pdf = AggregatedBamQC.read_group_gc_bias_pdf
+    String read_group_gc_bias_summary_metrics = AggregatedBamQC.read_group_gc_bias_summary_metrics
 
-    File? cross_check_fingerprints_metrics = UnmappedBamToAlignedBam.cross_check_fingerprints_metrics
+    String? cross_check_fingerprints_metrics = UnmappedBamToAlignedBam.cross_check_fingerprints_metrics
 
-    File selfSM = UnmappedBamToAlignedBam.selfSM
+    String selfSM = UnmappedBamToAlignedBam.selfSM
     Float contamination = UnmappedBamToAlignedBam.contamination
 
-    File calculate_read_group_checksum_md5 = AggregatedBamQC.calculate_read_group_checksum_md5
+    String calculate_read_group_checksum_md5 = AggregatedBamQC.calculate_read_group_checksum_md5
 
-    File agg_alignment_summary_metrics = AggregatedBamQC.agg_alignment_summary_metrics
-    File agg_bait_bias_detail_metrics = AggregatedBamQC.agg_bait_bias_detail_metrics
-    File agg_bait_bias_summary_metrics = AggregatedBamQC.agg_bait_bias_summary_metrics
-    File agg_gc_bias_detail_metrics = AggregatedBamQC.agg_gc_bias_detail_metrics
-    File agg_gc_bias_pdf = AggregatedBamQC.agg_gc_bias_pdf
-    File agg_gc_bias_summary_metrics = AggregatedBamQC.agg_gc_bias_summary_metrics
-    File agg_insert_size_histogram_pdf = AggregatedBamQC.agg_insert_size_histogram_pdf
-    File agg_insert_size_metrics = AggregatedBamQC.agg_insert_size_metrics
-    File agg_pre_adapter_detail_metrics = AggregatedBamQC.agg_pre_adapter_detail_metrics
-    File agg_pre_adapter_summary_metrics = AggregatedBamQC.agg_pre_adapter_summary_metrics
-    File agg_quality_distribution_pdf = AggregatedBamQC.agg_quality_distribution_pdf
-    File agg_quality_distribution_metrics = AggregatedBamQC.agg_quality_distribution_metrics
-    File agg_error_summary_metrics = AggregatedBamQC.agg_error_summary_metrics
+    String agg_alignment_summary_metrics = AggregatedBamQC.agg_alignment_summary_metrics
+    String agg_bait_bias_detail_metrics = AggregatedBamQC.agg_bait_bias_detail_metrics
+    String agg_bait_bias_summary_metrics = AggregatedBamQC.agg_bait_bias_summary_metrics
+    String agg_gc_bias_detail_metrics = AggregatedBamQC.agg_gc_bias_detail_metrics
+    String agg_gc_bias_pdf = AggregatedBamQC.agg_gc_bias_pdf
+    String agg_gc_bias_summary_metrics = AggregatedBamQC.agg_gc_bias_summary_metrics
+    String agg_insert_size_histogram_pdf = AggregatedBamQC.agg_insert_size_histogram_pdf
+    String agg_insert_size_metrics = AggregatedBamQC.agg_insert_size_metrics
+    String agg_pre_adapter_detail_metrics = AggregatedBamQC.agg_pre_adapter_detail_metrics
+    String agg_pre_adapter_summary_metrics = AggregatedBamQC.agg_pre_adapter_summary_metrics
+    String agg_quality_distribution_pdf = AggregatedBamQC.agg_quality_distribution_pdf
+    String agg_quality_distribution_metrics = AggregatedBamQC.agg_quality_distribution_metrics
+    String agg_error_summary_metrics = AggregatedBamQC.agg_error_summary_metrics
 
-    File? fingerprint_summary_metrics = AggregatedBamQC.fingerprint_summary_metrics
-    File? fingerprint_detail_metrics = AggregatedBamQC.fingerprint_detail_metrics
+    String? fingerprint_summary_metrics = AggregatedBamQC.fingerprint_summary_metrics
+    String? fingerprint_detail_metrics = AggregatedBamQC.fingerprint_detail_metrics
 
-    File wgs_metrics = CollectWgsMetrics.metrics
-    File raw_wgs_metrics = CollectRawWgsMetrics.metrics
+    String wgs_metrics = CollectWgsMetrics.metrics
+    String raw_wgs_metrics = CollectRawWgsMetrics.metrics
 
-    File duplicate_metrics = UnmappedBamToAlignedBam.duplicate_metrics
-    File output_bqsr_reports = UnmappedBamToAlignedBam.output_bqsr_reports
+    String duplicate_metrics = UnmappedBamToAlignedBam.duplicate_metrics
+    String output_bqsr_reports = UnmappedBamToAlignedBam.output_bqsr_reports
 
-    File gvcf_summary_metrics = BamToGvcf.vcf_summary_metrics
-    File gvcf_detail_metrics = BamToGvcf.vcf_detail_metrics
+    String gvcf_summary_metrics = BamToGvcf.vcf_summary_metrics
+    String gvcf_detail_metrics = BamToGvcf.vcf_detail_metrics
 
-    File? output_bam = provided_output_bam
-    File? output_bam_index = provided_output_bam_index
+    String? output_bam = provided_output_bam
+    String? output_bam_index = provided_output_bam_index
 
-    File output_cram = BamToCram.output_cram
-    File output_cram_index = BamToCram.output_cram_index
-    File output_cram_md5 = BamToCram.output_cram_md5
+    String output_cram = BamToCram.output_cram
+    String output_cram_index = BamToCram.output_cram_index
+    String output_cram_md5 = BamToCram.output_cram_md5
 
-    File validate_cram_file_report = BamToCram.validate_cram_file_report
+    String validate_cram_file_report = BamToCram.validate_cram_file_report
 
-    File output_vcf = BamToGvcf.output_vcf
-    File output_vcf_index = BamToGvcf.output_vcf_index
+    String output_vcf = BamToGvcf.output_vcf
+    String output_vcf_index = BamToGvcf.output_vcf_index
   }
   meta {
     allowNestedInputs: true
