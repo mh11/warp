@@ -43,14 +43,14 @@ task HaplotypeCaller_GATK35_GVCF {
   # Using PrintReads is a temporary solution until we update HaploypeCaller to use GATK4. Once that is done,
   # HaplotypeCaller can stream the required intervals directly from the cloud.
   command {
-    /usr/gitc/gatk4/gatk --java-options "-Xms2g" \
+    /usr/gitc/gatk4/gatk --java-options "-Xms2g -Xmx3g" \
       PrintReads \
       -I ~{input_bam} \
       --interval-padding 500 \
       -L ~{interval_list} \
       -O local.sharded.bam \
     && \
-    java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -Xms8000m \
+    java -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 -Xms8000m -Xmx11000m \
       -jar /usr/gitc/GATK35.jar \
       -T HaplotypeCaller \
       -R ~{ref_fasta} \
@@ -67,7 +67,7 @@ task HaplotypeCaller_GATK35_GVCF {
   runtime {
     docker: "us.gcr.io/broad-gotc-prod/genomes-in-the-cloud:2.4.7-1603303710"
     preemptible: preemptible_tries
-    memory: "10 GiB"
+    memory: "12 GiB"
     cpu: "1"
   }
   output {
@@ -110,7 +110,7 @@ task HaplotypeCaller_GATK4_VCF {
   if [ -f "~{flag_file}" ]; then
     echo "SKIP - file ~{flag_file} already exists."
   else
-    gatk --java-options "-Xms6000m -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
+    gatk --java-options "-Xms6000m -Xmx15000m -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10" \
       HaplotypeCaller \
       -R ~{ref_fasta} \
       -I ~{input_bam} \
@@ -131,7 +131,7 @@ task HaplotypeCaller_GATK4_VCF {
   runtime {
     docker: gatk_docker
     preemptible: preemptible_tries
-    memory: "6.5 GiB"
+    memory: "16 GiB"
     cpu: "2"
     bootDiskSizeGb: 15
   }
@@ -160,7 +160,7 @@ task MergeVCFs {
   if [ -f "~{flag_file}" ]; then
     echo "SKIP - file ~{flag_file} already exists."
   else
-    java -Xms2000m -jar /usr/picard/picard.jar \
+    java -Xms2000m -Xmx7000m -jar /usr/picard/picard.jar \
       MergeVcfs \
       INPUT=~{sep=' INPUT=' input_vcfs} \
       OUTPUT=~{output_vcf_name}
@@ -170,7 +170,7 @@ task MergeVCFs {
   runtime {
     docker: "us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8"
     preemptible: preemptible_tries
-    memory: "3 GiB"
+    memory: "8 GiB"
   }
   output {
     String output_vcf = "~{output_vcf_name}"
@@ -192,7 +192,7 @@ task HardFilterVcf {
   String output_vcf_name = vcf_basename + ".filtered.vcf.gz"
 
   command {
-     gatk --java-options "-Xms3000m" \
+     gatk --java-options "-Xms3000m -Xmx6000m" \
       VariantFiltration \
       -V ~{input_vcf} \
       -L ~{interval_list} \
@@ -207,7 +207,7 @@ task HardFilterVcf {
   runtime {
     docker: gatk_docker
     preemptible: preemptible_tries
-    memory: "3 GiB"
+    memory: "8 GiB"
   }
 }
 

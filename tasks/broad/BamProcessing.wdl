@@ -395,12 +395,13 @@ task GatherSortedBamFiles {
   }
 
   String flag_file = output_bam_basename + ".done"  # finished flag
+  String file_base_name = basename(output_bam_basename)
   
   Int memory_size = 3 
   Int java_memory_size = (memory_size - 1) * 1000
   Int min_java_mem = ceil(java_memory_size / 2)
 
-  command {
+  command <<<
   set -e
   if [ -f "~{flag_file}" ]; then
     echo "SKIP - file ~{flag_file} already exists."
@@ -412,9 +413,12 @@ task GatherSortedBamFiles {
       CREATE_INDEX=true \
       CREATE_MD5_FILE=true
 
+    # link bai index
+    ln -s ~{file_base_name}.bai ~{output_bam_basename}.bam.bai
+
     touch "~{flag_file}" # flag successful finish
   fi # test file exists
-    }
+    >>>
   runtime {
     docker: "us.gcr.io/broad-gotc-prod/picard-cloud:2.23.8"
     memory: "~{memory_size} GiB"
