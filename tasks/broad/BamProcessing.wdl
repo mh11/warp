@@ -123,8 +123,8 @@ task MarkDuplicates {
   # The merged bam will be smaller than the sum of the parts so we need to account for the unmerged inputs and the merged output.
   # Mark Duplicates takes in as input readgroup bams and outputs a slightly smaller aggregated bam. Giving .25 as wiggleroom
 
-  Float memory_size = 10 * memory_multiplier
-  Int java_memory_size = ceil(memory_size - 1)
+  Float memory_size = 15 * memory_multiplier
+  Int java_memory_size = ceil(memory_size - 3)
   Int min_mem_size = ceil(java_memory_size / 2)
 
   # Task is assuming query-sorted input so that the Secondary and Supplementary reads get marked correctly
