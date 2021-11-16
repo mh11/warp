@@ -445,16 +445,16 @@ workflow JointGenotyping {
   # String output_summary_metrics_file = select_first([CollectMetricsOnFullVcf.summary_metrics_file, GatherVariantCallingMetrics.summary_metrics_file])
 
   # # Get the VCFs from either code path
-  # Array[String?] output_vcf_files = if defined(FinalGatherVcf.output_vcf) then [FinalGatherVcf.output_vcf] else ApplyRecalibration.recalibrated_vcf
+  Array[String?] output_vcf_files = if defined(FinalGatherVcf.output_vcf) then [FinalGatherVcf.output_vcf] else ApplyRecalibration.recalibrated_vcf
   # Array[String?] output_vcf_index_files = if defined(FinalGatherVcf.output_vcf_index) then [FinalGatherVcf.output_vcf_index] else ApplyRecalibration.recalibrated_vcf_index
 
-  # output {
+  output {
   #   # Metrics from either the small or large callset
   #   String detail_metrics_file = output_detail_metrics_file
   #   String summary_metrics_file = output_summary_metrics_file
 
   #   # Outputs from the small callset path through the wdl.
-  #   Array[String] output_vcfs = select_all(output_vcf_files)
+    Array[String] output_vcfs = select_all(output_vcf_files)
   #   Array[String] output_vcf_indices = select_all(output_vcf_index_files)
 
   #   # Output the interval list generated/used by this run workflow.
@@ -462,7 +462,7 @@ workflow JointGenotyping {
 
   #   # # Output the metrics from crosschecking fingerprints.
   #   # String crosscheck_fingerprint_check = select_first([CrossCheckFingerprintSolo.crosscheck_metrics, GatherFingerprintingMetrics.gathered_metrics])
-  # }
+  }
   meta {
     allowNestedInputs: true
   }
